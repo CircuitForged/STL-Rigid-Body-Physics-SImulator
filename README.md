@@ -2,6 +2,10 @@
 
 A browser-based rigid body physics simulator for STL files with real-time interaction capabilities. To my knowledge, this is the first free and open-source STL physics simulator that provides a complete graphical user interface, eliminating the need for command-line operations.
 
+Right now there are some limitations, such as If you try to import mechanisms, the program will have a hard time with simulating them because the obect will start to glitch through each other. I am trying to fix this but since not many people have done this open source and not an huge servers, there is no where i can find answers to my problems. It still works alittle but im not happy with it right now.
+
+Non the less, i am releasing it because there doesnt seem to be any Physic Simulators out there that are no code, open source, local, accept stl file, or have a GUI. Sure there are one out there that have one or 2 of those, but not all of them.
+
 ## Features
 
 - **Real-Time Physics**: Powered by Ammo.js (a port of Bullet Physics)
