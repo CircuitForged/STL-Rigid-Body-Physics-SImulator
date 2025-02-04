@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>STL Physics Simulator</title>
+    <style>
+        /* Base styles */
+        body {
+            margin: 0;
+            background-color: #1a1a1a;
+            color: white;
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        /* Controls container */
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+        }
+
+        /* Control elements */
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        #stl-input {
+            color: white;
+            min-width: 200px;
+        }
+
+        /* Button styles */
+        .ctrl-btn {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            white-space: nowrap;
+        }
+
+        #reset {
+            background: #f44336;
+        }
+
+        #toggle-wireframe {
+            background: #2196F3;
+        }
+
+        #toggle-com {
+            background: #FF9800;
+        }
+
+        #error-message {
+            color: #ff6b6b;
+            margin-top: 5px;
+            font-size: 14px;
+        }
+
+        /* dat.GUI customization */
+        .dg.main {
+            position: fixed !important;
+            top: 0 !important;
+            right: 0 !important;
+            height: 100% !important;
+            background: #000 !important;
+            margin-right: 0 !important;
+            transition: transform 0.3s ease !important;
+        }
+
+        .dg.main.closed {
+            transform: translateX(300px) !important;
+        }
+
+        .dg.main .close-button {
+            position: fixed !important;
+            top: 0 !important;
+            right: 300px !important;
+            width: 30px !important;
+            height: 30px !important;
+            line-height: 30px !important;
+            text-align: center !important;
+            background: rgba(0, 0, 0, 0.8) !important;
+            border-radius: 5px 0 0 5px !important;
+            cursor: pointer !important;
+            font-size: 20px !important;
+        }
+
+        .dg.main .close-button:hover {
+            background: rgba(40, 40, 40, 0.8) !important;
+        }
+
+        .dg.main>ul {
+            height: calc(100% - 30px) !important;
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+        }
+
+        .dg.main .title {
+            background: #000 !important;
+        }
+
+        .dg.main .property-name {
+            width: 40% !important;
+        }
+
+        .dg.main .cr.function .property-name {
+            width: 100% !important;
+        }
+
+        .dg.main .folder {
+            width: 300px !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="controls">
+        <div class="control-row">
+            <input type="file" id="stl-input" accept=".stl" multiple>
+            <button id="toggle-physics" class="ctrl-btn">Start Physics</button>
+            <button id="step-physics" class="ctrl-btn" disabled>Step</button>
+            <button id="reset" class="ctrl-btn">Reset</button>
+            <button id="toggle-wireframe" class="ctrl-btn">Show Collision Mesh</button>
+            <button id="toggle-com" class="ctrl-btn">Show Center of Mass</button>
+            <button id="toggle-projection" class="ctrl-btn">Show Ground Projection</button>
+            <button id="toggle-constrained" class="ctrl-btn">Free Drag</button>
+        </div>
+        <div id="error-message"></div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://raw.githack.com/kripken/ammo.js/master/builds/ammo.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+
+    <script src="js/three.min.js"></script>
+    <script src="js/ammo.js"></script>
+    <script src="js/dat.gui.min.js"></script>
+    <script src="js/OrbitControls.js"></script>
+    <script src="js/STLLoader.js"></script>
+
+    <script>
+        // Replace the entire script section with this optimized version
+        const config = {
+            physics: {
+                gravity: -9.81,
+                linearDamping: 0.3,
+                angularDamping: 0.3,
+                restitution: 0.2,
+                friction: 0.8
+            },
+            visuals: {
+                color: '#ffffff',
+                opacity: 1.0,
+                wireframeColor: '#00ff00',
+                wireframeOpacity: 0.5,
+                centerOfMassColor: '#ff9800',
+                centerOfMassSize: 0.5
+            },
+            environment: {
+                backgroundColor: '#1a1a1a',
+                groundColor: '#333333',
+                gridColor: '#666666',
+                gridDivisions: 40,
+                showGrid: true,
+                ambientLightIntensity: 0.5,
+                mainLightIntensity: 0.8,
+                sunOrbitAngle: 0,
+                sunDistance: 15,
+                sunHeight: 10,
+                showSun: true
+            },
+            state: {
+                physicsRunning: false,
+                stepping: false,
+                wireframeMode: false,
+                showCenterOfMass: false,
+                groundedObjects: new Set(),
+                constrainedDrag: true  // New state for constrained drag mode
+            }
+        };
+
+        let world = {
+            physics: null,
+            scene: null,
+            camera: null,
+            renderer: null,
+            controls: null,
+            gui: null,
+            rigidBodies: [],
+            tmpTrans: null,
+            raycaster: new THREE.Raycaster(),
+            mouse: new THREE.Vector2(),
+            dragState: {
+                selectedObject: null,
+                isDragging: false,
+                plane: new THREE.Plane(),
+                offset: new THREE.Vector3(),
+                point: new THREE.Vector3(),
+                constraint: null,
+                mousePoint: null,
+                currentHeight: 0
+            }
+        };
+
+        Ammo().then(init);
+
+        function init() {
+            world.tmpTrans = new Ammo.btTransform();
+            setupPhysics();
+            setupGraphics();
+            setupGUI();
+            setupEventListeners();
+            createGround();
+            updateEnvironment();
+            animate();
+        }
+
+        function setupPhysics() {
+            const collisionConfig = new Ammo.btDefaultCollisionConfiguration();
+            const dispatcher = new Ammo.btCollisionDispatcher(collisionConfig);
+            const broadphase = new Ammo.btDbvtBroadphase();
+            const solver = new Ammo.btSequentialImpulseConstraintSolver();
+
+            world.physics = new Ammo.btDiscreteDynamicsWorld(dispatcher, broadphase, solver, collisionConfig);
+            world.physics.setGravity(new Ammo.btVector3(0, config.physics.gravity, 0));
+
+            // Enable GImpact and configure collision detection
+            Ammo.btGImpactCollisionAlgorithm.prototype.registerAlgorithm(dispatcher);
+            const dispatchInfo = world.physics.getDispatchInfo();
+            const solverInfo = world.physics.getSolverInfo();
+
+            dispatchInfo.set_m_allowedCcdPenetration(0.001);
+            solverInfo.set_m_numIterations(100);
+            solverInfo.set_m_splitImpulse(true);
+            solverInfo.set_m_splitImpulsePenetrationThreshold(0.001);
+        }
+
+        function setupGraphics() {
+            world.scene = new THREE.Scene();
+            world.scene.background = new THREE.Color(config.environment.backgroundColor);
+
+            world.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            world.camera.position.set(10, 10, 10);
+
+            world.renderer = new THREE.WebGLRenderer({ antialias: true });
+            world.renderer.setSize(window.innerWidth, window.innerHeight);
+            world.renderer.shadowMap.enabled = true;
+            document.body.appendChild(world.renderer.domElement);
+
+            world.controls = new THREE.OrbitControls(world.camera, world.renderer.domElement);
+            world.controls.enableDamping = true;
+            world.controls.mouseButtons = {
+                LEFT: THREE.MOUSE.RIGHT,
+                MIDDLE: THREE.MOUSE.MIDDLE,
+                RIGHT: THREE.MOUSE.LEFT
+            };
+
+            setupLights();
+        }
+
+        function setupLights() {
+            // Ambient light
+            world.ambientLight = new THREE.AmbientLight(0x404040, config.environment.ambientLightIntensity);
+            world.scene.add(world.ambientLight);
+
+            // Directional light (sun)
+            world.mainLight = new THREE.DirectionalLight(0xffffff, config.environment.mainLightIntensity);
+            world.mainLight.castShadow = true;
+
+            const shadowCamera = world.mainLight.shadow.camera;
+            Object.assign(shadowCamera, {
+                near: 0.1, far: 100,
+                left: -20, right: 20,
+                top: 20, bottom: -20
+            });
+            world.mainLight.shadow.mapSize.set(2048, 2048);
+            world.scene.add(world.mainLight);
+
+            // Sun visualization
+            world.sunSphere = new THREE.Mesh(
+                new THREE.SphereGeometry(1, 16, 16),
+                new THREE.MeshBasicMaterial({ color: 0xffff00 })
+            );
+            world.scene.add(world.sunSphere);
+            updateSunPosition();
+        }
+
+        function updateSunPosition() {
+            const angle = config.environment.sunOrbitAngle * Math.PI * 2;
+            const x = Math.cos(angle) * config.environment.sunDistance;
+            const z = Math.sin(angle) * config.environment.sunDistance;
+            const y = config.environment.sunHeight;
+
+            world.mainLight.position.set(x, y, z);
+            world.sunSphere.position.copy(world.mainLight.position);
+        }
+
+        function setupGUI() {
+            world.gui = new dat.GUI({ width: 300 });
+            const folders = {
+                physics: world.gui.addFolder('Physics Settings'),
+                visual: world.gui.addFolder('Visual Settings'),
+                env: world.gui.addFolder('Environment Settings'),
+                lighting: world.gui.addFolder('Lighting')
+            };
+
+            // Physics settings
+            Object.entries(config.physics).forEach(([key, value]) => {
+                folders.physics.add(config.physics, key,
+                    key === 'gravity' ? -20 : 0,
+                    key === 'gravity' ? 0 : 1)
+                    .onChange(() => {
+                        if (key === 'gravity') {
+                            world.physics.setGravity(new Ammo.btVector3(0, config.physics.gravity, 0));
+                        }
+                        // Update physics properties for all bodies
+                        world.rigidBodies.forEach(obj => {
+                            const body = obj.userData.physicsBody;
+                            body.setDamping(config.physics.linearDamping, config.physics.angularDamping);
+                            body.setRestitution(config.physics.restitution);
+                            body.setFriction(config.physics.friction);
+                            body.activate(true);
+                        });
+                    });
+            });
+
+            // Visual settings
+            const visualSettings = [
+                { key: 'color', name: 'Object Color', isColor: true },
+                { key: 'opacity', name: 'Object Opacity', range: [0, 1] },
+                { key: 'wireframeColor', name: 'Wireframe Color', isColor: true },
+                { key: 'wireframeOpacity', name: 'Wireframe Opacity', range: [0, 1] },
+                { key: 'centerOfMassColor', name: 'COM Color', isColor: true },
+                { key: 'centerOfMassSize', name: 'COM Size', range: [0, 2] }
+            ];
+
+            visualSettings.forEach(setting => {
+                const control = setting.isColor ?
+                    folders.visual.addColor(config.visuals, setting.key) :
+                    folders.visual.add(config.visuals, setting.key, ...(setting.range || []));
+                control.name(setting.name).onChange(() => updateVisuals(setting.key));
+            });
+
+            // Environment settings
+            const envSettings = [
+                { key: 'backgroundColor', name: 'Background', isColor: true },
+                { key: 'groundColor', name: 'Ground', isColor: true },
+                { key: 'gridColor', name: 'Grid', isColor: true },
+                { key: 'gridDivisions', name: 'Grid Lines', range: [10, 100], step: 1 },
+                { key: 'showGrid', name: 'Show Grid' }
+            ];
+
+            envSettings.forEach(setting => {
+                const control = setting.isColor ?
+                    folders.env.addColor(config.environment, setting.key) :
+                    folders.env.add(config.environment, setting.key, ...(setting.range || []));
+                control.name(setting.name).onChange(updateEnvironment);
+            });
+
+            // Lighting settings
+            const lightSettings = [
+                { key: 'ambientLightIntensity', name: 'Ambient', range: [0, 1] },
+                { key: 'mainLightIntensity', name: 'Intensity', range: [0, 1] },
+                { key: 'showSun', name: 'Show Sun' },
+                { key: 'sunOrbitAngle', name: 'Sun Orbit Position', range: [0, 1] },
+                { key: 'sunDistance', name: 'Sun Distance', range: [5, 30] },
+                { key: 'sunHeight', name: 'Sun Height', range: [0, 20] }
+            ];
+
+            lightSettings.forEach(setting => {
+                const control = folders.lighting.add(config.environment, setting.key, ...(setting.range || []));
+                control.name(setting.name).onChange(() => {
+                    if (setting.key.includes('sun')) {
+                        updateSunPosition();
+                    }
+                    updateEnvironment();
+                });
+            });
+
+            Object.values(folders).forEach(folder => folder.open());
+
+            // Update GUI close button
+            const closeButton = document.querySelector('.dg.main .close-button');
+            if (closeButton) {
+                closeButton.innerHTML = '❯';
+                closeButton.onclick = () => {
+                    const gui = document.querySelector('.dg.main');
+                    gui.classList.toggle('closed');
+                    closeButton.innerHTML = gui.classList.contains('closed') ? '❮' : '❯';
+                };
+            }
+        }
+
+        function updateEnvironment() {
+            world.scene.background.set(config.environment.backgroundColor);
+
+            // Update ground
+            const ground = world.scene.getObjectByProperty('isGroundPlane', true);
+            if (ground) {
+                ground.material.color.set(config.environment.groundColor);
+            }
+
+            // Update grid
+            const oldGrid = world.scene.getObjectByProperty('isGridHelper', true);
+            if (oldGrid) {
+                world.scene.remove(oldGrid);
+            }
+
+            if (config.environment.showGrid) {
+                const grid = new THREE.GridHelper(
+                    40,
+                    config.environment.gridDivisions,
+                    config.environment.gridColor,
+                    0x444444
+                );
+                grid.position.y = 0.01;
+                grid.isGridHelper = true;
+                world.scene.add(grid);
+            }
+
+            // Update lights
+            world.ambientLight.intensity = config.environment.ambientLightIntensity;
+            world.mainLight.intensity = config.environment.mainLightIntensity;
+            if (world.sunSphere) {
+                world.sunSphere.visible = config.environment.showSun;
+            }
+        }
+
+        function updateVisuals(key) {
+            world.rigidBodies.forEach(obj => {
+                if (key.includes('Color') || key === 'opacity') {
+                    Object.assign(obj.material, {
+                        color: new THREE.Color(config.visuals.color),
+                        opacity: config.visuals.opacity,
+                        transparent: config.visuals.opacity < 1,
+                        needsUpdate: true
+                    });
+                }
+
+                if (obj.userData.wireframe && key.includes('wireframe')) {
+                    Object.assign(obj.userData.wireframe.material, {
+                        color: new THREE.Color(config.visuals.wireframeColor),
+                        opacity: config.visuals.wireframeOpacity,
+                        needsUpdate: true
+                    });
+                }
+
+                if (obj.userData.comIndicator && key.includes('centerOfMass')) {
+                    obj.userData.comIndicator.material.color.setStyle(config.visuals.centerOfMassColor);
+                    obj.userData.comIndicator.scale.setScalar(config.visuals.centerOfMassSize);
+                }
+            });
+        }
+
+        function updatePhysics() {
+            // Use smaller timesteps for better precision
+            const substeps = 20;
+            const dt = 1 / (60 * substeps);
+
+            for (let i = 0; i < substeps; i++) {
+                world.physics.stepSimulation(dt, 10);
+            }
+
+            world.rigidBodies.forEach(obj => {
+                const ms = obj.userData.physicsBody.getMotionState();
+                if (ms) {
+                    ms.getWorldTransform(world.tmpTrans);
+                    const p = world.tmpTrans.getOrigin();
+                    const q = world.tmpTrans.getRotation();
+
+                    obj.position.set(p.x(), p.y(), p.z());
+                    obj.quaternion.set(q.x(), q.y(), q.z(), q.w());
+
+                    ['wireframe', 'comIndicator'].forEach(prop => {
+                        if (obj.userData[prop]) {
+                            obj.userData[prop].position.copy(obj.position);
+                            obj.userData[prop].quaternion.copy(obj.quaternion);
+                        }
+                    });
+
+                    // Update ground projection
+                    updateGroundProjection(obj);
+                }
+            });
+        }
+
+        function loadSTL(file) {
+            const reader = new FileReader();
+            reader.onload = e => {
+                try {
+                    const geometry = new THREE.STLLoader().parse(e.target.result);
+                    geometry.computeBoundingBox();
+
+                    const maxDim = Math.max(
+                        ...['x', 'y', 'z'].map(axis =>
+                            geometry.boundingBox.max[axis] - geometry.boundingBox.min[axis])
+                    );
+                    const scale = 5 / maxDim;
+
+                    // Split and process components
+                    const components = splitGeometryIntoComponents(geometry);
+                    const overallBoundingBox = new THREE.Box3();
+                    const componentBoundingBoxes = components.map(comp => {
+                        const bbox = new THREE.Box3().setFromBufferAttribute(comp.attributes.position);
+                        overallBoundingBox.union(bbox);
+                        return bbox;
+                    });
+
+                    const overallCenter = overallBoundingBox.getCenter(new THREE.Vector3());
+
+                    components.forEach((componentGeometry, index) => {
+                        const componentCenter = componentBoundingBoxes[index]
+                            .getCenter(new THREE.Vector3())
+                            .sub(overallCenter);
+                        createPhysicsObject(componentGeometry, scale, componentCenter);
+                    });
+
+                } catch (error) {
+                    console.error('Error loading STL:', error);
+                    showError(`Error loading ${file.name}: ${error.message}`);
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        // Helper functions for geometry processing
+        function getVertexKey(vertices, index, tolerance) {
+            return ['x', 'y', 'z']
+                .map(axis => Math.round(vertices[index + { 'x': 0, 'y': 1, 'z': 2 }[axis]] / tolerance) * tolerance)
+                .join(',');
+        }
+
+        function splitGeometryIntoComponents(geometry) {
+            const vertices = geometry.attributes.position.array;
+            const components = [];
+            const visited = new Set();
+            const tolerance = 1e-7;
+
+            // Build vertex-triangle adjacency map
+            const vertexToTriangles = new Map();
+
+            for (let i = 0; i < vertices.length; i += 9) {
+                const vertexKeys = [0, 3, 6].map(offset =>
+                    getVertexKey(vertices, i + offset, tolerance)
+                );
+
+                vertexKeys.forEach(key => {
+                    if (!vertexToTriangles.has(key)) {
+                        vertexToTriangles.set(key, new Set());
+                    }
+                    vertexToTriangles.get(key).add(i / 9);
+                });
+            }
+
+            // Find connected components using BFS
+            for (let startTriangle = 0; startTriangle < vertices.length / 9; startTriangle++) {
+                if (visited.has(startTriangle)) continue;
+
+                const component = new Set([startTriangle]);
+                const queue = [startTriangle];
+                visited.add(startTriangle);
+
+                while (queue.length > 0) {
+                    const currentTriangle = queue.shift();
+                    const baseIndex = currentTriangle * 9;
+
+                    // Process connected triangles through shared vertices
+                    [0, 3, 6].map(offset => getVertexKey(vertices, baseIndex + offset, tolerance))
+                        .forEach(vertexKey => {
+                            vertexToTriangles.get(vertexKey).forEach(neighborTriangle => {
+                                if (!visited.has(neighborTriangle)) {
+                                    visited.add(neighborTriangle);
+                                    component.add(neighborTriangle);
+                                    queue.push(neighborTriangle);
+                                }
+                            });
+                        });
+                }
+
+                if (component.size > 0) {
+                    components.push(createComponentGeometry(geometry, Array.from(component)));
+                }
+            }
+
+            return components;
+        }
+
+        function createComponentGeometry(sourceGeometry, triangleIndices) {
+            const vertexCount = triangleIndices.length * 9;
+            const vertices = new Float32Array(vertexCount);
+            const normals = new Float32Array(vertexCount);
+
+            triangleIndices.forEach((triangleIndex, i) => {
+                const sourceIndex = triangleIndex * 9;
+                const targetIndex = i * 9;
+
+                // Copy vertices and normals
+                for (let j = 0; j < 9; j++) {
+                    vertices[targetIndex + j] = sourceGeometry.attributes.position.array[sourceIndex + j];
+                    if (sourceGeometry.attributes.normal) {
+                        normals[targetIndex + j] = sourceGeometry.attributes.normal.array[sourceIndex + j];
+                    }
+                }
+            });
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            geometry.setAttribute('normal', sourceGeometry.attributes.normal ?
+                new THREE.BufferAttribute(normals, 3) :
+                undefined);
+
+            if (!sourceGeometry.attributes.normal) {
+                geometry.computeVertexNormals();
+            }
+
+            return geometry;
+        }
+
+        function createCompoundShape(geometry, scale) {
+            const vertices = geometry.attributes.position.array;
+            const triangleMesh = new Ammo.btTriangleMesh(true, true);
+
+            // Compute approximate size for margin scaling
+            geometry.computeBoundingSphere();
+            const size = geometry.boundingSphere.radius * scale;
+            const margin = size * 0.002;
+
+            for (let i = 0; i < vertices.length; i += 9) {
+                const [v1, v2, v3] = [0, 3, 6].map(offset =>
+                    new Ammo.btVector3(
+                        vertices[i + offset] * scale,
+                        vertices[i + offset + 1] * scale,
+                        vertices[i + offset + 2] * scale
+                    )
+                );
+
+                triangleMesh.addTriangle(v1, v2, v3, false);
+                [v1, v2, v3].forEach(v => Ammo.destroy(v));
+            }
+
+            const shape = new Ammo.btGImpactMeshShape(triangleMesh);
+            shape.setMargin(margin);
+            shape.updateBound();
+
+            return shape;
+        }
+
+        function createWireframe(geometry, scale) {
+            const wireframe = new THREE.LineSegments(
+                new THREE.WireframeGeometry(geometry),
+                new THREE.LineBasicMaterial({
+                    color: config.visuals.wireframeColor,
+                    opacity: config.visuals.wireframeOpacity,
+                    transparent: true
+                })
+            );
+            wireframe.scale.setScalar(scale);
+            wireframe.visible = config.state.wireframeMode;
+            return wireframe;
+        }
+
+        function createComIndicator() {
+            const indicator = new THREE.Mesh(
+                new THREE.SphereGeometry(0.15),
+                new THREE.MeshBasicMaterial({
+                    color: config.visuals.centerOfMassColor,
+                    transparent: true,
+                    opacity: 1.0,
+                    depthTest: false
+                })
+            );
+            indicator.renderOrder = 999;
+            indicator.visible = config.state.showCenterOfMass;
+            return indicator;
+        }
+
+        function calculateCenterOfMass(geometry) {
+            const vertices = geometry.attributes.position.array;
+            let totalVolume = 0;
+            const centerOfMass = new THREE.Vector3();
+
+            for (let i = 0; i < vertices.length; i += 9) {
+                const triangle = {
+                    v1: new THREE.Vector3(vertices[i], vertices[i + 1], vertices[i + 2]),
+                    v2: new THREE.Vector3(vertices[i + 3], vertices[i + 4], vertices[i + 5]),
+                    v3: new THREE.Vector3(vertices[i + 6], vertices[i + 7], vertices[i + 8])
+                };
+
+                const tetraVolume = calculateTetrahedronVolume(triangle);
+                const tetraCentroid = calculateTetrahedronCentroid(triangle);
+
+                centerOfMass.add(tetraCentroid.multiplyScalar(tetraVolume));
+                totalVolume += tetraVolume;
+            }
+
+            if (Math.abs(totalVolume) > 1e-8) {
+                centerOfMass.divideScalar(totalVolume);
+            }
+
+            return centerOfMass;
+        }
+
+        function calculateTetrahedronVolume(triangle) {
+            const v1CrossV2 = new THREE.Vector3();
+            v1CrossV2.crossVectors(triangle.v2, triangle.v3);
+            return triangle.v1.dot(v1CrossV2) / 6.0;
+        }
+
+        function calculateTetrahedronCentroid(triangle) {
+            return new THREE.Vector3()
+                .add(triangle.v1)
+                .add(triangle.v2)
+                .add(triangle.v3)
+                .divideScalar(4.0);
+        }
+
+        function createGround() {
+            const groundShape = new Ammo.btStaticPlaneShape(new Ammo.btVector3(0, 1, 0), 0);
+            const groundTransform = new Ammo.btTransform();
+            groundTransform.setIdentity();
+
+            const rbInfo = new Ammo.btRigidBodyConstructionInfo(
+                0, new Ammo.btDefaultMotionState(groundTransform),
+                groundShape, new Ammo.btVector3(0, 0, 0)
+            );
+            world.physics.addRigidBody(new Ammo.btRigidBody(rbInfo));
+
+            const groundMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(40, 40),
+                new THREE.MeshStandardMaterial({
+                    color: config.environment.groundColor,
+                    roughness: 0.8
+                })
+            );
+            groundMesh.rotation.x = -Math.PI / 2;
+            groundMesh.receiveShadow = true;
+            groundMesh.isGroundPlane = true;
+            world.scene.add(groundMesh);
+        }
+
+        function handleMouseDown(event) {
+            if (event.button !== 0 && event.button !== 2) return;
+            event.preventDefault();
+
+            world.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            world.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            world.raycaster.setFromCamera(world.mouse, world.camera);
+
+            // Store initial height when starting drag
+            if (event.button === 0) {
+                const intersects = world.raycaster.intersectObjects(world.rigidBodies);
+                if (intersects.length && intersects[0].object.userData.physicsBody) {
+                    world.dragState.currentHeight = intersects[0].object.position.y;
+                }
+            }
+
+            const intersects = world.raycaster.intersectObjects(world.rigidBodies);
+            if (intersects.length && intersects[0].object.userData.physicsBody) {
+                if (event.button === 2) {
+                    handleGrounding(intersects[0].object);
+                } else {
+                    world.controls.enabled = false;
+                    world.dragState.selectedObject = intersects[0].object;
+                    world.dragState.isDragging = true;
+                    world.dragState.point.copy(intersects[0].point);
+
+                    if (config.state.physicsRunning) setupDragConstraint(intersects[0]);
+                }
+            }
+        }
+
+        function handleGrounding(object) {
+            const physicsBody = object.userData.physicsBody;
+            const isGrounded = config.state.groundedObjects.has(object);
+
+            if (isGrounded) {
+                config.state.groundedObjects.delete(object);
+                const shape = physicsBody.getCollisionShape();
+                const localInertia = new Ammo.btVector3(0, 0, 0);
+                shape.calculateLocalInertia(1, localInertia);
+
+                physicsBody.setMassProps(1, localInertia);
+                physicsBody.setLinearFactor(new Ammo.btVector3(1, 1, 1));
+                physicsBody.setAngularFactor(new Ammo.btVector3(1, 1, 1));
+                physicsBody.setDamping(config.physics.linearDamping, config.physics.angularDamping);
+                physicsBody.setRestitution(config.physics.restitution);
+                physicsBody.setFriction(config.physics.friction);
+                physicsBody.forceActivationState(Ammo.ACTIVE_TAG);
+                physicsBody.activate(true);
+
+                world.physics.removeRigidBody(physicsBody);
+                world.physics.addRigidBody(physicsBody);
+            } else {
+                config.state.groundedObjects.add(object);
+                physicsBody.setMassProps(0, new Ammo.btVector3(0, 0, 0));
+                physicsBody.setLinearFactor(new Ammo.btVector3(0, 0, 0));
+                physicsBody.setAngularFactor(new Ammo.btVector3(0, 0, 0));
+                physicsBody.setCollisionFlags(physicsBody.getCollisionFlags() | Ammo.CF_KINEMATIC_OBJECT);
+                physicsBody.forceActivationState(Ammo.DISABLE_DEACTIVATION);
+            }
+        }
+
+        function setupDragConstraint(intersect) {
+            const mouseTransform = new Ammo.btTransform();
+            mouseTransform.setIdentity();
+
+            const body = world.dragState.selectedObject.userData.physicsBody;
+
+            // Get the body's center of mass transform
+            const bodyTransform = new Ammo.btTransform();
+            body.getMotionState().getWorldTransform(bodyTransform);
+            const bodyOrigin = bodyTransform.getOrigin();
+
+            // In constrained mode, always grab from center of mass
+            if (config.state.constrainedDrag) {
+                mouseTransform.setOrigin(new Ammo.btVector3(
+                    bodyOrigin.x(),
+                    world.dragState.currentHeight,
+                    bodyOrigin.z()
+                ));
+            } else {
+                mouseTransform.setOrigin(new Ammo.btVector3(
+                    world.dragState.point.x,
+                    world.dragState.point.y,
+                    world.dragState.point.z
+                ));
+            }
+
+            world.dragState.mousePoint = new Ammo.btRigidBody(
+                new Ammo.btRigidBodyConstructionInfo(0,
+                    new Ammo.btDefaultMotionState(mouseTransform),
+                    new Ammo.btSphereShape(0.0001),
+                    new Ammo.btVector3(0, 0, 0)
+                )
+            );
+            world.physics.addRigidBody(world.dragState.mousePoint);
+
+            const localPivot = body.getCenterOfMassTransform().inverse()
+                .op_mul(mouseTransform).getOrigin();
+
+            // Check if shift is held
+            if (world.dragState.shiftKey) {
+                // Kill all movement
+                body.setAngularFactor(new Ammo.btVector3(0, 0, 0));
+                body.setAngularVelocity(new Ammo.btVector3(0, 0, 0));
+                body.setLinearVelocity(new Ammo.btVector3(0, 0, 0));
+            } else {
+                body.setAngularFactor(new Ammo.btVector3(1, 1, 1));
+            }
+
+            world.dragState.constraint = new Ammo.btPoint2PointConstraint(
+                body,
+                world.dragState.mousePoint,
+                new Ammo.btVector3(localPivot.x(), localPivot.y(), localPivot.z()),
+                new Ammo.btVector3(0, 0, 0)
+            );
+
+            world.dragState.constraint.setParam(Ammo.BT_CONSTRAINT_STOP_CFM, 0.9);
+            world.dragState.constraint.setParam(Ammo.BT_CONSTRAINT_STOP_ERP, 0.1);
+
+            world.physics.addConstraint(world.dragState.constraint, true);
+            body.setDamping(0.8, 0.8);
+            body.setActivationState(Ammo.DISABLE_DEACTIVATION);
+        }
+
+        function handleMouseMove(event) {
+            if (!world.dragState.isDragging || !world.dragState.selectedObject || !world.dragState.mousePoint) return;
+
+            if (config.state.constrainedDrag) {
+                // Constrained to ground plane
+                world.dragState.plane.normal.set(0, 1, 0);
+                world.dragState.plane.constant = 0;
+            } else {
+                // Free drag using camera plane
+                const cameraDirection = new THREE.Vector3();
+                world.camera.getWorldDirection(cameraDirection);
+                world.dragState.plane.normal.copy(cameraDirection);
+                world.dragState.plane.constant = -world.dragState.selectedObject.position.dot(world.dragState.plane.normal);
+            }
+
+            world.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            world.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            world.raycaster.setFromCamera(world.mouse, world.camera);
+
+            if (world.raycaster.ray.intersectPlane(world.dragState.plane, world.dragState.point)) {
+                const transform = new Ammo.btTransform();
+                transform.setIdentity();
+
+                if (config.state.constrainedDrag) {
+                    transform.setOrigin(new Ammo.btVector3(
+                        world.dragState.point.x,
+                        world.dragState.currentHeight,
+                        world.dragState.point.z
+                    ));
+                } else {
+                    transform.setOrigin(new Ammo.btVector3(
+                        world.dragState.point.x,
+                        world.dragState.point.y,
+                        world.dragState.point.z
+                    ));
+                }
+                world.dragState.mousePoint.getMotionState().setWorldTransform(transform);
+                world.dragState.mousePoint.setWorldTransform(transform);
+                world.dragState.selectedObject.userData.physicsBody.activate(true);
+            }
+        }
+
+        function handleMouseUp() {
+            if (world.dragState.selectedObject) {
+                world.controls.enabled = true;
+
+                if (config.state.physicsRunning && world.dragState.constraint) {
+                    world.physics.removeConstraint(world.dragState.constraint);
+                    world.physics.removeRigidBody(world.dragState.mousePoint);
+                    Ammo.destroy(world.dragState.constraint);
+                    Ammo.destroy(world.dragState.mousePoint);
+                    world.dragState.constraint = null;
+                    world.dragState.mousePoint = null;
+
+                    const body = world.dragState.selectedObject.userData.physicsBody;
+                    // Always restore normal physics state on release
+                    body.setDamping(config.physics.linearDamping, config.physics.angularDamping);
+                    body.setAngularFactor(new Ammo.btVector3(1, 1, 1));
+                    body.setActivationState(Ammo.ACTIVE_TAG);
+                    body.activate(true);
+                }
+
+                world.dragState.selectedObject = null;
+                world.dragState.isDragging = false;
+                world.dragState.shiftKey = false;  // Reset shift key state
+            }
+        }
+
+        function createPhysicsObject(geometry, scale, offset = new THREE.Vector3()) {
+            geometry.center();
+
+            const mesh = new THREE.Mesh(
+                geometry,
+                new THREE.MeshStandardMaterial({
+                    color: config.visuals.color,
+                    opacity: config.visuals.opacity,
+                    transparent: config.visuals.opacity < 1,
+                    side: THREE.DoubleSide
+                })
+            );
+
+            mesh.scale.setScalar(scale);
+            mesh.position.set(
+                offset.x * scale,
+                5 + offset.y * scale,
+                offset.z * scale
+            );
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            const shape = createCompoundShape(geometry, scale);
+            const transform = new Ammo.btTransform();
+            transform.setIdentity();
+            transform.setOrigin(new Ammo.btVector3(...mesh.position.toArray()));
+
+            const motionState = new Ammo.btDefaultMotionState(transform);
+            const localInertia = new Ammo.btVector3(0, 0, 0);
+            shape.calculateLocalInertia(1, localInertia);
+
+            const rbInfo = new Ammo.btRigidBodyConstructionInfo(1, motionState, shape, localInertia);
+            Object.assign(rbInfo, {
+                m_restitution: 0.0,
+                m_friction: 0.9,
+                m_rollingFriction: 0.0,
+                m_spinningFriction: 0.0
+            });
+
+            const body = new Ammo.btRigidBody(rbInfo);
+            body.setDamping(0.3, 0.3);
+            body.setCcdMotionThreshold(0.00001);
+            body.setCcdSweptSphereRadius(scale * 0.2);
+
+            body.setContactProcessingThreshold(0.001);
+            body.setCollisionFlags(
+                body.getCollisionFlags() |
+                Ammo.CF_CUSTOM_MATERIAL_CALLBACK |
+                Ammo.CF_HAS_CONTACT_STIFFNESS_DAMPING
+            );
+
+            world.physics.addRigidBody(body);
+
+            const wireframe = createWireframe(geometry, scale);
+            const comIndicator = createComIndicator();
+            const centerOfMass = calculateCenterOfMass(geometry);
+            const groundProjection = createGroundProjectionMarker();
+
+            [wireframe, comIndicator].forEach(helper => {
+                helper.position.copy(mesh.position);
+                helper.quaternion.copy(mesh.quaternion);
+            });
+
+            // Add ground projection elements to scene
+            world.scene.add(groundProjection.marker);
+            world.scene.add(groundProjection.line);
+
+            mesh.userData = {
+                physicsBody: body,
+                wireframe,
+                comIndicator,
+                groundProjection,
+                centerOfMass: centerOfMass.clone().multiplyScalar(scale)
+            };
+
+            world.rigidBodies.push(mesh);
+            [mesh, wireframe, comIndicator].forEach(obj => world.scene.add(obj));
+
+            return mesh;
+        }
+
+        function setupEventListeners() {
+            // File input handler
+            document.getElementById('stl-input').onchange = e => {
+                if (e.target.files.length > 0) {
+                    Array.from(e.target.files).forEach(loadSTL);
+                }
+            };
+
+            // Key event handlers
+            document.addEventListener('keydown', (event) => {
+                if (event.key === 'Shift' && world.dragState.selectedObject) {
+                    world.dragState.shiftKey = true;
+                    const body = world.dragState.selectedObject.userData.physicsBody;
+                    body.setAngularFactor(new Ammo.btVector3(0, 0, 0));
+                    body.setAngularVelocity(new Ammo.btVector3(0, 0, 0));
+                    body.setLinearVelocity(new Ammo.btVector3(0, 0, 0));
+                    body.activate(true);
+                }
+            });
+
+            document.addEventListener('keyup', (event) => {
+                if (event.key === 'Shift' && world.dragState.selectedObject) {
+                    world.dragState.shiftKey = false;
+                    const body = world.dragState.selectedObject.userData.physicsBody;
+                    body.setAngularFactor(new Ammo.btVector3(1, 1, 1));
+                    body.activate(true);
+                }
+            });
+
+            // Physics control handlers
+            const controls = {
+                'step-physics': () => {
+                    if (!config.state.physicsRunning) updatePhysics(true);
+                },
+                'toggle-physics': (btn) => {
+                    config.state.physicsRunning = !config.state.physicsRunning;
+                    btn.textContent = config.state.physicsRunning ? 'Stop Physics' : 'Start Physics';
+                    document.getElementById('step-physics').disabled = config.state.physicsRunning;
+                },
+                'reset': () => {
+                    // Clean up any active drag state
+                    if (world.dragState.constraint) {
+                        world.physics.removeConstraint(world.dragState.constraint);
+                        Ammo.destroy(world.dragState.constraint);
+                        world.dragState.constraint = null;
+                    }
+                    if (world.dragState.mousePoint) {
+                        world.physics.removeRigidBody(world.dragState.mousePoint);
+                        Ammo.destroy(world.dragState.mousePoint);
+                        world.dragState.mousePoint = null;
+                    }
+
+                    // Reset drag state
+                    world.dragState.selectedObject = null;
+                    world.dragState.isDragging = false;
+                    world.dragState.shiftKey = false;
+                    world.dragState.currentHeight = 0;
+                    world.controls.enabled = true;
+
+                    // Clean up all rigid bodies and their visual elements
+                    world.rigidBodies.forEach(mesh => {
+                        // Remove physics body
+                        world.physics.removeRigidBody(mesh.userData.physicsBody);
+                        Ammo.destroy(mesh.userData.physicsBody);
+
+                        // Remove visual elements
+                        ['wireframe', 'comIndicator', 'groundProjection'].forEach(prop => {
+                            if (mesh.userData[prop]) {
+                                if (prop === 'groundProjection') {
+                                    world.scene.remove(mesh.userData[prop].marker);
+                                    world.scene.remove(mesh.userData[prop].line);
+                                } else {
+                                    world.scene.remove(mesh.userData[prop]);
+                                }
+                            }
+                        });
+
+                        // Remove mesh itself
+                        world.scene.remove(mesh);
+                    });
+
+                    // Clear arrays and sets
+                    world.rigidBodies = [];
+                    config.state.groundedObjects.clear();
+
+                    // Reset camera position
+                    world.camera.position.set(10, 10, 10);
+                    world.camera.lookAt(0, 0, 0);
+                    world.controls.target.set(0, 0, 0);
+                    world.controls.update();
+                },
+                'toggle-wireframe': (btn) => {
+                    config.state.wireframeMode = !config.state.wireframeMode;
+                    world.rigidBodies.forEach(obj => {
+                        if (obj.userData.wireframe) {
+                            obj.userData.wireframe.visible = config.state.wireframeMode;
+                        }
+                    });
+                    btn.textContent = config.state.wireframeMode ? 'Hide Collision Mesh' : 'Show Collision Mesh';
+                },
+                'toggle-com': (btn) => {
+                    config.state.showCenterOfMass = !config.state.showCenterOfMass;
+                    world.rigidBodies.forEach(obj => {
+                        if (obj.userData.comIndicator) {
+                            obj.userData.comIndicator.visible = config.state.showCenterOfMass;
+                        }
+                    });
+                    btn.textContent = config.state.showCenterOfMass ? 'Hide Center of Mass' : 'Show Center of Mass';
+                },
+                'toggle-projection': (btn) => {
+                    config.state.showGroundProjection = !config.state.showGroundProjection;
+                    world.rigidBodies.forEach(obj => {
+                        if (obj.userData.groundProjection) {
+                            obj.userData.groundProjection.marker.visible = config.state.showGroundProjection;
+                            obj.userData.groundProjection.line.visible = config.state.showGroundProjection;
+                        }
+                    });
+                    btn.textContent = config.state.showGroundProjection ? 'Hide Ground Projection' : 'Show Ground Projection';
+                },
+                'toggle-constrained': (btn) => {
+                    config.state.constrainedDrag = !config.state.constrainedDrag;
+                    btn.textContent = config.state.constrainedDrag ? 'Free Drag' : 'Constrained Drag';
+                }
+            };
+
+            Object.entries(controls).forEach(([id, handler]) => {
+                document.getElementById(id).onclick = function () { handler(this); };
+            });
+
+            // Mouse interaction handlers
+            const canvas = world.renderer.domElement;
+            ['pointerdown', 'pointermove', 'pointerup', 'pointerleave', 'wheel'].forEach(event => {
+                canvas.addEventListener(event, {
+                    pointerdown: handleMouseDown,
+                    pointermove: handleMouseMove,
+                    pointerup: handleMouseUp,
+                    pointerleave: handleMouseUp,
+                    wheel: handleMouseWheel
+                }[event]);
+            });
+
+            canvas.addEventListener('selectstart', e => e.preventDefault());
+            canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+            // Window resize handler
+            window.addEventListener('resize', () => {
+                world.camera.aspect = window.innerWidth / window.innerHeight;
+                world.camera.updateProjectionMatrix();
+                world.renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            world.controls.update();
+
+            if (config.state.physicsRunning) {
+                updatePhysics();
+            }
+
+            world.renderer.render(world.scene, world.camera);
+        }
+
+        function handleMouseWheel(event) {
+            if (world.dragState.isDragging && world.dragState.selectedObject && config.state.constrainedDrag) {
+                event.preventDefault();
+                // Adjust height based on wheel delta
+                const heightDelta = event.deltaY * -0.01;
+                world.dragState.currentHeight = Math.max(0.1, world.dragState.currentHeight + heightDelta);
+
+                if (world.dragState.mousePoint) {
+                    const transform = new Ammo.btTransform();
+                    transform.setIdentity();
+                    transform.setOrigin(new Ammo.btVector3(
+                        world.dragState.point.x,
+                        world.dragState.currentHeight,
+                        world.dragState.point.z
+                    ));
+                    world.dragState.mousePoint.getMotionState().setWorldTransform(transform);
+                    world.dragState.mousePoint.setWorldTransform(transform);
+                    world.dragState.selectedObject.userData.physicsBody.activate(true);
+                }
+            }
+        }
+
+        function createGroundProjectionMarker() {
+            // Create a circular marker
+            const markerGeometry = new THREE.CircleGeometry(0.15, 32);
+            const markerMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff0000,
+                transparent: true,
+                opacity: 0.7,
+                side: THREE.DoubleSide,
+                depthWrite: false
+            });
+
+            const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+            marker.rotation.x = -Math.PI / 2; // Lay flat on ground
+            marker.renderOrder = 1; // Ensure it renders above the ground
+            marker.visible = false; // Start hidden
+
+            // Add vertical line
+            const lineGeometry = new THREE.BufferGeometry();
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: 0xff0000,
+                transparent: true,
+                opacity: 0.5
+            });
+
+            const linePositions = new Float32Array(6); // Two points: start and end
+            lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+            const line = new THREE.Line(lineGeometry, lineMaterial);
+            line.visible = false; // Start hidden
+
+            return { marker, line };
+        }
+
+        function updateGroundProjection(obj) {
+            if (!obj.userData.groundProjection) return;
+
+            const { marker, line } = obj.userData.groundProjection;
+            const objPosition = obj.position;
+
+            // Update marker position (on ground)
+            marker.position.set(objPosition.x, 0.01, objPosition.z);
+
+            // Update line vertices
+            const positions = line.geometry.attributes.position.array;
+            // Ground point
+            positions[0] = objPosition.x;
+            positions[1] = 0.01;
+            positions[2] = objPosition.z;
+            // Object point
+            positions[3] = objPosition.x;
+            positions[4] = objPosition.y;
+            positions[5] = objPosition.z;
+
+            line.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            setTimeout(() => errorDiv.textContent = '', 5000);
+        }
+    </script>
+</body>
+
+</html>
