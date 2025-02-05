@@ -137,7 +137,7 @@
         </div>
         <div id="error-message"></div>
     </div>
-    
+
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://raw.githack.com/kripken/ammo.js/master/builds/ammo.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dat-gui/0.7.9/dat.gui.min.js"></script>
@@ -151,7 +151,7 @@
     <script src="js/STLLoader.js"></script>
 
     <script>
-        // Replace the entire script section with this optimized version
+        // Configuration object for simulator settings
         const config = {
             physics: {
                 gravity: -9.81,
@@ -161,7 +161,7 @@
                 friction: 0.8
             },
             visuals: {
-                color: '#ffffff',
+                color: '#a0a0a0',
                 opacity: 1.0,
                 wireframeColor: '#00ff00',
                 wireframeOpacity: 0.5,
@@ -187,10 +187,11 @@
                 wireframeMode: false,
                 showCenterOfMass: false,
                 groundedObjects: new Set(),
-                constrainedDrag: true  // New state for constrained drag mode
+                constrainedDrag: true
             }
         };
 
+        // World object to store global state
         let world = {
             physics: null,
             scene: null,
@@ -214,6 +215,7 @@
             }
         };
 
+        // Initialize Ammo.js physics engine
         Ammo().then(init);
 
         function init() {
@@ -227,6 +229,7 @@
             animate();
         }
 
+        // Physics setup
         function setupPhysics() {
             const collisionConfig = new Ammo.btDefaultCollisionConfiguration();
             const dispatcher = new Ammo.btCollisionDispatcher(collisionConfig);
@@ -247,6 +250,7 @@
             solverInfo.set_m_splitImpulsePenetrationThreshold(0.001);
         }
 
+        // Graphics setup
         function setupGraphics() {
             world.scene = new THREE.Scene();
             world.scene.background = new THREE.Color(config.environment.backgroundColor);
@@ -271,21 +275,29 @@
         }
 
         function setupLights() {
-            // Ambient light
-            world.ambientLight = new THREE.AmbientLight(0x404040, config.environment.ambientLightIntensity);
+            // Ambient light - Increase intensity for more uniform lighting
+            world.ambientLight = new THREE.AmbientLight(0xffffff, 0.7);  // Changed color to white and increased intensity
             world.scene.add(world.ambientLight);
 
-            // Directional light (sun)
-            world.mainLight = new THREE.DirectionalLight(0xffffff, config.environment.mainLightIntensity);
+            // Directional light (sun) - Adjust position and intensity
+            world.mainLight = new THREE.DirectionalLight(0xffffff, 0.5);  // Reduced intensity to balance with ambient
             world.mainLight.castShadow = true;
 
+            // Improve shadow quality and coverage
             const shadowCamera = world.mainLight.shadow.camera;
             Object.assign(shadowCamera, {
-                near: 0.1, far: 100,
-                left: -20, right: 20,
-                top: 20, bottom: -20
+                near: 1,
+                far: 50,
+                left: -30,
+                right: 30,
+                top: 30,
+                bottom: -30
             });
             world.mainLight.shadow.mapSize.set(2048, 2048);
+            world.mainLight.shadow.bias = -0.001;  // Add shadow bias to reduce artifacts
+
+            // Position light more overhead for even illumination
+            world.mainLight.position.set(15, 20, 15);
             world.scene.add(world.mainLight);
 
             // Sun visualization
@@ -293,10 +305,10 @@
                 new THREE.SphereGeometry(1, 16, 16),
                 new THREE.MeshBasicMaterial({ color: 0xffff00 })
             );
+            world.sunSphere.position.copy(world.mainLight.position);
             world.scene.add(world.sunSphere);
-            updateSunPosition();
         }
-
+        // Update sun position based on orbit angle
         function updateSunPosition() {
             const angle = config.environment.sunOrbitAngle * Math.PI * 2;
             const x = Math.cos(angle) * config.environment.sunDistance;
@@ -307,6 +319,7 @@
             world.sunSphere.position.copy(world.mainLight.position);
         }
 
+        // GUI setup for controls
         function setupGUI() {
             world.gui = new dat.GUI({ width: 300 });
             const folders = {
@@ -403,6 +416,7 @@
             }
         }
 
+        // Update environment settings
         function updateEnvironment() {
             world.scene.background.set(config.environment.backgroundColor);
 
@@ -438,6 +452,7 @@
             }
         }
 
+        // Update visual properties of objects
         function updateVisuals(key) {
             world.rigidBodies.forEach(obj => {
                 if (key.includes('Color') || key === 'opacity') {
@@ -464,6 +479,7 @@
             });
         }
 
+        // Update physics simulation
         function updatePhysics() {
             // Use smaller timesteps for better precision
             const substeps = 20;
@@ -496,6 +512,7 @@
             });
         }
 
+        // Load and process STL files
         function loadSTL(file) {
             const reader = new FileReader();
             reader.onload = e => {
@@ -546,7 +563,7 @@
             const vertices = geometry.attributes.position.array;
             const components = [];
             const visited = new Set();
-            const tolerance = 1e-7;
+            const tolerance = 1e-8;
 
             // Build vertex-triangle adjacency map
             const vertexToTriangles = new Map();
@@ -739,17 +756,16 @@
 
             const groundMesh = new THREE.Mesh(
                 new THREE.PlaneGeometry(40, 40),
-                new THREE.MeshStandardMaterial({
-                    color: config.environment.groundColor,
-                    roughness: 0.8
+                new THREE.MeshBasicMaterial({  // Changed from MeshStandardMaterial to MeshBasicMaterial
+                    color: config.environment.groundColor
                 })
             );
             groundMesh.rotation.x = -Math.PI / 2;
-            groundMesh.receiveShadow = true;
+            groundMesh.receiveShadow = false;  // Disabled shadow receiving
             groundMesh.isGroundPlane = true;
             world.scene.add(groundMesh);
         }
-
+        // Mouse interaction handlers
         function handleMouseDown(event) {
             if (event.button !== 0 && event.button !== 2) return;
             event.preventDefault();
@@ -943,85 +959,87 @@
             }
         }
 
-        function createPhysicsObject(geometry, scale, offset = new THREE.Vector3()) {
-            geometry.center();
+        function handleMouseWheel(event) {
+            if (world.dragState.isDragging && world.dragState.selectedObject && config.state.constrainedDrag) {
+                event.preventDefault();
+                // Adjust height based on wheel delta
+                const heightDelta = event.deltaY * -0.01;
+                world.dragState.currentHeight = Math.max(0.1, world.dragState.currentHeight + heightDelta);
 
-            const mesh = new THREE.Mesh(
-                geometry,
-                new THREE.MeshStandardMaterial({
-                    color: config.visuals.color,
-                    opacity: config.visuals.opacity,
-                    transparent: config.visuals.opacity < 1,
-                    side: THREE.DoubleSide
-                })
-            );
+                if (world.dragState.mousePoint) {
+                    const transform = new Ammo.btTransform();
+                    transform.setIdentity();
+                    transform.setOrigin(new Ammo.btVector3(
+                        world.dragState.point.x,
+                        world.dragState.currentHeight,
+                        world.dragState.point.z
+                    ));
+                    world.dragState.mousePoint.getMotionState().setWorldTransform(transform);
+                    world.dragState.mousePoint.setWorldTransform(transform);
+                    world.dragState.selectedObject.userData.physicsBody.activate(true);
+                }
+            }
+        }
 
-            mesh.scale.setScalar(scale);
-            mesh.position.set(
-                offset.x * scale,
-                5 + offset.y * scale,
-                offset.z * scale
-            );
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-
-            const shape = createCompoundShape(geometry, scale);
-            const transform = new Ammo.btTransform();
-            transform.setIdentity();
-            transform.setOrigin(new Ammo.btVector3(...mesh.position.toArray()));
-
-            const motionState = new Ammo.btDefaultMotionState(transform);
-            const localInertia = new Ammo.btVector3(0, 0, 0);
-            shape.calculateLocalInertia(1, localInertia);
-
-            const rbInfo = new Ammo.btRigidBodyConstructionInfo(1, motionState, shape, localInertia);
-            Object.assign(rbInfo, {
-                m_restitution: 0.0,
-                m_friction: 0.9,
-                m_rollingFriction: 0.0,
-                m_spinningFriction: 0.0
+        function createGroundProjectionMarker() {
+            // Create a circular marker
+            const markerGeometry = new THREE.CircleGeometry(0.15, 32);
+            const markerMaterial = new THREE.MeshBasicMaterial({
+                color: 0xff0000,
+                transparent: true,
+                opacity: 0.7,
+                side: THREE.DoubleSide,
+                depthWrite: false
             });
 
-            const body = new Ammo.btRigidBody(rbInfo);
-            body.setDamping(0.3, 0.3);
-            body.setCcdMotionThreshold(0.00001);
-            body.setCcdSweptSphereRadius(scale * 0.2);
+            const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+            marker.rotation.x = -Math.PI / 2; // Lay flat on ground
+            marker.renderOrder = 1; // Ensure it renders above the ground
+            marker.visible = false; // Start hidden
 
-            body.setContactProcessingThreshold(0.001);
-            body.setCollisionFlags(
-                body.getCollisionFlags() |
-                Ammo.CF_CUSTOM_MATERIAL_CALLBACK |
-                Ammo.CF_HAS_CONTACT_STIFFNESS_DAMPING
-            );
-
-            world.physics.addRigidBody(body);
-
-            const wireframe = createWireframe(geometry, scale);
-            const comIndicator = createComIndicator();
-            const centerOfMass = calculateCenterOfMass(geometry);
-            const groundProjection = createGroundProjectionMarker();
-
-            [wireframe, comIndicator].forEach(helper => {
-                helper.position.copy(mesh.position);
-                helper.quaternion.copy(mesh.quaternion);
+            // Add vertical line
+            const lineGeometry = new THREE.BufferGeometry();
+            const lineMaterial = new THREE.LineBasicMaterial({
+                color: 0xff0000,
+                transparent: true,
+                opacity: 0.5
             });
 
-            // Add ground projection elements to scene
-            world.scene.add(groundProjection.marker);
-            world.scene.add(groundProjection.line);
+            const linePositions = new Float32Array(6); // Two points: start and end
+            lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
+            const line = new THREE.Line(lineGeometry, lineMaterial);
+            line.visible = false; // Start hidden
 
-            mesh.userData = {
-                physicsBody: body,
-                wireframe,
-                comIndicator,
-                groundProjection,
-                centerOfMass: centerOfMass.clone().multiplyScalar(scale)
-            };
+            return { marker, line };
+        }
 
-            world.rigidBodies.push(mesh);
-            [mesh, wireframe, comIndicator].forEach(obj => world.scene.add(obj));
+        function updateGroundProjection(obj) {
+            if (!obj.userData.groundProjection) return;
 
-            return mesh;
+            const { marker, line } = obj.userData.groundProjection;
+            const objPosition = obj.position;
+
+            // Update marker position (on ground)
+            marker.position.set(objPosition.x, 0.01, objPosition.z);
+
+            // Update line vertices
+            const positions = line.geometry.attributes.position.array;
+            // Ground point
+            positions[0] = objPosition.x;
+            positions[1] = 0.01;
+            positions[2] = objPosition.z;
+            // Object point
+            positions[3] = objPosition.x;
+            positions[4] = objPosition.y;
+            positions[5] = objPosition.z;
+
+            line.geometry.attributes.position.needsUpdate = true;
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            setTimeout(() => errorDiv.textContent = '', 5000);
         }
 
         function setupEventListeners() {
@@ -1187,87 +1205,85 @@
             world.renderer.render(world.scene, world.camera);
         }
 
-        function handleMouseWheel(event) {
-            if (world.dragState.isDragging && world.dragState.selectedObject && config.state.constrainedDrag) {
-                event.preventDefault();
-                // Adjust height based on wheel delta
-                const heightDelta = event.deltaY * -0.01;
-                world.dragState.currentHeight = Math.max(0.1, world.dragState.currentHeight + heightDelta);
+        function createPhysicsObject(geometry, scale, offset = new THREE.Vector3()) {
+            geometry.center();
 
-                if (world.dragState.mousePoint) {
-                    const transform = new Ammo.btTransform();
-                    transform.setIdentity();
-                    transform.setOrigin(new Ammo.btVector3(
-                        world.dragState.point.x,
-                        world.dragState.currentHeight,
-                        world.dragState.point.z
-                    ));
-                    world.dragState.mousePoint.getMotionState().setWorldTransform(transform);
-                    world.dragState.mousePoint.setWorldTransform(transform);
-                    world.dragState.selectedObject.userData.physicsBody.activate(true);
-                }
-            }
-        }
+            const mesh = new THREE.Mesh(
+                geometry,
+                new THREE.MeshStandardMaterial({
+                    color: config.visuals.color,
+                    opacity: config.visuals.opacity,
+                    transparent: config.visuals.opacity < 1,
+                    side: THREE.DoubleSide
+                })
+            );
 
-        function createGroundProjectionMarker() {
-            // Create a circular marker
-            const markerGeometry = new THREE.CircleGeometry(0.15, 32);
-            const markerMaterial = new THREE.MeshBasicMaterial({
-                color: 0xff0000,
-                transparent: true,
-                opacity: 0.7,
-                side: THREE.DoubleSide,
-                depthWrite: false
+            mesh.scale.setScalar(scale);
+            mesh.position.set(
+                offset.x * scale,
+                5 + offset.y * scale,
+                offset.z * scale
+            );
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            const shape = createCompoundShape(geometry, scale);
+            const transform = new Ammo.btTransform();
+            transform.setIdentity();
+            transform.setOrigin(new Ammo.btVector3(...mesh.position.toArray()));
+
+            const motionState = new Ammo.btDefaultMotionState(transform);
+            const localInertia = new Ammo.btVector3(0, 0, 0);
+            shape.calculateLocalInertia(1, localInertia);
+
+            const rbInfo = new Ammo.btRigidBodyConstructionInfo(1, motionState, shape, localInertia);
+            Object.assign(rbInfo, {
+                m_restitution: 0.0,
+                m_friction: 0.9,
+                m_rollingFriction: 0.0,
+                m_spinningFriction: 0.0
             });
 
-            const marker = new THREE.Mesh(markerGeometry, markerMaterial);
-            marker.rotation.x = -Math.PI / 2; // Lay flat on ground
-            marker.renderOrder = 1; // Ensure it renders above the ground
-            marker.visible = false; // Start hidden
+            const body = new Ammo.btRigidBody(rbInfo);
+            body.setDamping(0.3, 0.3);
+            body.setCcdMotionThreshold(0.00001);
+            body.setCcdSweptSphereRadius(scale * 0.000002);
 
-            // Add vertical line
-            const lineGeometry = new THREE.BufferGeometry();
-            const lineMaterial = new THREE.LineBasicMaterial({
-                color: 0xff0000,
-                transparent: true,
-                opacity: 0.5
+            body.setContactProcessingThreshold(0.001);
+            body.setCollisionFlags(
+                body.getCollisionFlags() |
+                Ammo.CF_CUSTOM_MATERIAL_CALLBACK |
+                Ammo.CF_HAS_CONTACT_STIFFNESS_DAMPING
+            );
+
+            world.physics.addRigidBody(body);
+
+            const wireframe = createWireframe(geometry, scale);
+            const comIndicator = createComIndicator();
+            const centerOfMass = calculateCenterOfMass(geometry);
+            const groundProjection = createGroundProjectionMarker();
+
+            [wireframe, comIndicator].forEach(helper => {
+                helper.position.copy(mesh.position);
+                helper.quaternion.copy(mesh.quaternion);
             });
 
-            const linePositions = new Float32Array(6); // Two points: start and end
-            lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
-            const line = new THREE.Line(lineGeometry, lineMaterial);
-            line.visible = false; // Start hidden
+            // Add ground projection elements to scene
+            world.scene.add(groundProjection.marker);
+            world.scene.add(groundProjection.line);
 
-            return { marker, line };
-        }
+            mesh.userData = {
+                physicsBody: body,
+                wireframe,
+                comIndicator,
+                groundProjection,
+                centerOfMass: centerOfMass.clone().multiplyScalar(scale)
+            };
 
-        function updateGroundProjection(obj) {
-            if (!obj.userData.groundProjection) return;
+            world.rigidBodies.push(mesh);
+            [mesh, wireframe, comIndicator].forEach(obj => world.scene.add(obj));
 
-            const { marker, line } = obj.userData.groundProjection;
-            const objPosition = obj.position;
-
-            // Update marker position (on ground)
-            marker.position.set(objPosition.x, 0.01, objPosition.z);
-
-            // Update line vertices
-            const positions = line.geometry.attributes.position.array;
-            // Ground point
-            positions[0] = objPosition.x;
-            positions[1] = 0.01;
-            positions[2] = objPosition.z;
-            // Object point
-            positions[3] = objPosition.x;
-            positions[4] = objPosition.y;
-            positions[5] = objPosition.z;
-
-            line.geometry.attributes.position.needsUpdate = true;
-        }
-
-        function showError(message) {
-            const errorDiv = document.getElementById('error-message');
-            errorDiv.textContent = message;
-            setTimeout(() => errorDiv.textContent = '', 5000);
+            return mesh;
         }
     </script>
 </body>
