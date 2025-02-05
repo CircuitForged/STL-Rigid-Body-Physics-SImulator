@@ -635,7 +635,7 @@
             // Compute approximate size for margin scaling
             geometry.computeBoundingSphere();
             const size = geometry.boundingSphere.radius * scale;
-            const margin = size * 0.002;
+            const margin = size * 0.000001;
 
             for (let i = 0; i < vertices.length; i += 9) {
                 const [v1, v2, v3] = [0, 3, 6].map(offset =>
