@@ -81,7 +81,15 @@ Contributions are welcome! Please feel free to submit a Pull Request. Please pro
 
 ## License
 
-[MIT](https://choosealicense.com/licenses/mit/)
+This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License (CC BY-NC-SA 4.0).
+This means:
+
+✅ You can share, copy, and redistribute the code
+✅ You can adapt, modify, and build upon the code
+❌ You cannot use the code for commercial purposes
+❌ You cannot distribute your modifications under a different license
+📝 You must give appropriate credit and indicate if changes were made
+📝 You must distribute your modifications under the same license
 
 ## Acknowledgments
 
